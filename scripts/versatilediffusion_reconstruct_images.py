@@ -33,7 +33,6 @@ assert sub in [1,2,5,7]
 strength = float(args.diff_str)
 mixing = float(args.mix_str)
 
-
 def regularize_image(x):
         BICUBIC = PIL.Image.Resampling.BICUBIC
         if isinstance(x, str):
@@ -62,23 +61,24 @@ net = get_model()(cfgm)
 sd = torch.load(pth, map_location='cpu')
 net.load_state_dict(sd, strict=False)    
 
+# Ensuring proper GPU device assignment, using cuda:0 for all tensor assignments
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-# Might require editing the GPU assignments due to Memory issues
+# Move models and data to GPU (cuda:0)
 net.clip.cuda(0)
 net.autokl.cuda(0)
 
-#net.model.cuda(1)
 sampler = sampler(net)
-#sampler.model.model.cuda(1)
-#sampler.model.cuda(1)
+sampler.model.model.diffusion_model.device = device
+sampler.model.model.diffusion_model.half().to(device)
 batch_size = 1
 
+# Load predicted features and move them to GPU
 pred_text = np.load('data/predicted_features/subj{:02d}/nsd_cliptext_predtest_nsdgeneral.npy'.format(sub))
-pred_text = torch.tensor(pred_text).half().cuda(1)
+pred_text = torch.tensor(pred_text).half().to(device)
 
 pred_vision = np.load('data/predicted_features/subj{:02d}/nsd_clipvision_predtest_nsdgeneral.npy'.format(sub))
-pred_vision = torch.tensor(pred_vision).half().cuda(1)
-
+pred_vision = torch.tensor(pred_vision).half().to(device)
 
 n_samples = 1
 ddim_steps = 50
@@ -89,47 +89,40 @@ ctype = 'prompt'
 net.autokl.half()
 
 torch.manual_seed(0)
-for im_id in range(len(pred_vision)):
 
+for im_id in range(len(pred_vision)):
     zim = Image.open('results/vdvae/subj{:02d}/{}.png'.format(sub,im_id))
-   
     zim = regularize_image(zim)
     zin = zim*2 - 1
-    zin = zin.unsqueeze(0).cuda(0).half()
+    zin = zin.unsqueeze(0).to(device).half()
 
     init_latent = net.autokl_encode(zin)
     
     sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=ddim_eta, verbose=False)
-    #strength=0.75
-    assert 0. <= strength <= 1., 'can only work with strength in [0.0, 1.0]'
     t_enc = int(strength * ddim_steps)
-    device = 'cuda:0'
+    
+    # Encode the image using the sampler
     z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]).to(device))
-    #z_enc,_ = sampler.encode(init_latent.cuda(1).half(), c.cuda(1).half(), torch.tensor([t_enc]).to(sampler.model.model.diffusion_model.device))
 
+    # Encoding text and vision
     dummy = ''
     utx = net.clip_encode_text(dummy)
-    utx = utx.cuda(1).half()
+    utx = utx.to(device).half()
     
-    dummy = torch.zeros((1,3,224,224)).cuda(0)
+    dummy = torch.zeros((1,3,224,224)).to(device)
     uim = net.clip_encode_vision(dummy)
-    uim = uim.cuda(1).half()
+    uim = uim.to(device).half()
     
-    z_enc = z_enc.cuda(1)
+    z_enc = z_enc.to(device)
 
+    # Sample configuration for diffusion
     h, w = 512,512
     shape = [n_samples, 4, h//8, w//8]
 
-    cim = pred_vision[im_id].unsqueeze(0)
-    ctx = pred_text[im_id].unsqueeze(0)
-    
-    #c[:,0] = u[:,0]
-    #z_enc = z_enc.cuda(1).half()
-    
-    sampler.model.model.diffusion_model.device='cuda:1'
-    sampler.model.model.diffusion_model.half().cuda(1)
-    #mixing = 0.4
-    
+    cim = pred_vision[im_id].unsqueeze(0).to(device)
+    ctx = pred_text[im_id].unsqueeze(0).to(device)
+
+    # Decode using sampler
     z = sampler.decode_dc(
         x_latent=z_enc,
         first_conditioning=[uim, cim],
@@ -139,17 +132,19 @@ for im_id in range(len(pred_vision)):
         xtype='image', 
         first_ctype='vision',
         second_ctype='prompt',
-        mixed_ratio=(1-mixing), )
+        mixed_ratio=(1-mixing),
+    )
     
-    z = z.cuda(0).half()
+    z = z.to(device).half()
     x = net.autokl_decode(z)
+
+    # Adjust color if needed
     color_adj='None'
-    #color_adj_to = cin[0]
-    color_adj_flag = (color_adj!='none') and (color_adj!='None') and (color_adj is not None)
-    color_adj_simple = (color_adj=='Simple') or color_adj=='simple'
+    color_adj_flag = (color_adj != 'none') and (color_adj != 'None') and (color_adj is not None)
+    color_adj_simple = (color_adj == 'Simple') or color_adj == 'simple'
     color_adj_keep_ratio = 0.5
     
-    if color_adj_flag and (ctype=='vision'):
+    if color_adj_flag and (ctype == 'vision'):
         x_adj = []
         for xi in x:
             color_adj_f = color_adjust(ref_from=(xi+1)/2, ref_to=color_adj_to)
@@ -159,8 +154,6 @@ for im_id in range(len(pred_vision)):
     else:
         x = torch.clamp((x+1.0)/2.0, min=0.0, max=1.0)
         x = [tvtrans.ToPILImage()(xi) for xi in x]
-    
 
-    x[0].save('results/versatile_diffusion/subj{:02d}/{}.png'.format(sub,im_id))
-      
-
+    # Save output image
+    x[0].save('results/versatile_diffusion/subj{:02d}/{}.png'.format(sub, im_id))
