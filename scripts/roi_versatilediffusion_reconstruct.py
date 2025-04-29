@@ -67,17 +67,17 @@ net.load_state_dict(sd, strict=False)
 net.clip.cuda(0)
 net.autokl.cuda(0)
 
-#net.model.cuda(1)
+#net.model.cuda(0)
 sampler = sampler(net)
-#sampler.model.model.cuda(1)
-#sampler.model.cuda(1)
+#sampler.model.model.cuda(0)
+#sampler.model.cuda(0)
 batch_size = 1
 
 pred_text = np.load('data/predicted_features/subj{:02d}/nsd_cliptext_roi_nsdgeneral.npy'.format(sub))
-pred_text = torch.tensor(pred_text).half().cuda(1)
+pred_text = torch.tensor(pred_text).half().cuda(0)
 
 pred_vision = np.load('data/predicted_features/subj{:02d}/nsd_clipvision_roi_nsdgeneral.npy'.format(sub))
-pred_vision = torch.tensor(pred_vision).half().cuda(1)
+pred_vision = torch.tensor(pred_vision).half().cuda(0)
 
 
 n_samples = 1
@@ -109,17 +109,17 @@ for im_id in range(len(pred_vision)):
     t_enc = int(strength * ddim_steps)
     device = 'cuda:0'
     z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]).to(device))
-    #z_enc,_ = sampler.encode(init_latent.cuda(1).half(), c.cuda(1).half(), torch.tensor([t_enc]).to(sampler.model.model.diffusion_model.device))
+    #z_enc,_ = sampler.encode(init_latent.cuda(0).half(), c.cuda(0).half(), torch.tensor([t_enc]).to(sampler.model.model.diffusion_model.device))
 
     dummy = ''
     utx = net.clip_encode_text(dummy)
-    utx = utx.cuda(1).half()
+    utx = utx.cuda(0).half()
     
     dummy = torch.zeros((1,3,224,224)).cuda(0)
     uim = net.clip_encode_vision(dummy)
-    uim = uim.cuda(1).half()
+    uim = uim.cuda(0).half()
     
-    z_enc = z_enc.cuda(1)
+    z_enc = z_enc.cuda(0)
 
     h, w = 512,512
     shape = [n_samples, 4, h//8, w//8]
@@ -128,10 +128,10 @@ for im_id in range(len(pred_vision)):
     ctx = pred_text[im_id].unsqueeze(0)
     
     #c[:,0] = u[:,0]
-    #z_enc = z_enc.cuda(1).half()
+    #z_enc = z_enc.cuda(0).half()
     
-    sampler.model.model.diffusion_model.device='cuda:1'
-    sampler.model.model.diffusion_model.half().cuda(1)
+    sampler.model.model.diffusion_model.device='cuda:0'
+    sampler.model.model.diffusion_model.half().cuda(0)
     #mixing = 0.4
     
     z = sampler.decode_dc(
